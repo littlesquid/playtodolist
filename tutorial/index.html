@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Play Framework - ReactiveMongo - Polymer</title>
+</head>
+<body>
+    <div>
+        <h2>Play Framework - ReactiveMongo - Polymer</h2>
+        <p>
+            The purpose of this application is to demonstrate a Service Oriented Approach for Single Page App development.
+        </p>
+        <p>
+            To serve this purpose this application template integrates <code>Polymer</code>, <code>Play Framework</code> and <code>MongoDB</code>.
+        </p>
+
+    </div>
+
+    <div>
+        <h2>Database</h2>
+        <p>
+            A document based NoSQL <code>MongoDB</code> database is used along with <code>ReactiveMongo</code> driver to connect to it in asynchronous, non-blocking way.
+        </p>
+
+        <p>
+            To install <code>MongoDB</code> on your computer you can use this <a href="http://docs.mongodb.org/v2.6/installation/">manual</a>.
+        </p>
+
+        <p>
+        To connect to database <a href="https://github.com/ReactiveMongo/Play-ReactiveMongo">Play-ReactiveMongo</a> plugin is used.
+        To make it work the following has been done:
+        </p>
+        <ol>
+            <li>Adding dependency in <a href="#code/build.sbt" class="shortcut">build.sbt</a>
+                <pre><code>"org.reactivemongo" %% "play2-reactivemongo" % "0.11.7.play24"</code></pre>
+            </li>
+            <li>Adding plugin in <a href="#code/conf/play.plugins" class="shortcut">play.plugins</a>
+                <pre><code>1100:play.modules.reactivemongo.ReactiveMongoPlugin</code></pre>
+            </li>
+            <li>Adding database url in <a href="#code/conf/application.conf" class="shortcut">application.conf</a>
+                <pre><code>mongodb.uri = "mongodb://localhost:27017/posts"</code></pre>
+            </li>
+        </ol>
+
+    </div>
+
+    <div>
+        <h2>REST API</h2>
+
+        <p>
+            The application tier is delivered by a simple <code>Play</code> app.
+            This way you can easily take advantage of <code>Play</code>'s ecosystem, eg. add some plugins or other
+            benefits, such as Akka, CoffeScript support Web Sockets and many, many more.
+            The template has one <code>Controller</code>: <a href="#code/app/controllers/Posts.scala" class="shortcut">Posts</a>.
+            It has <code>PostRepo</code> which uses <code>Play-ReactiveMongo</code> plugin under the hood.
+
+
+        </p>
+        <p>
+            <code>PostRepo</code> provides <code>db</code> object to access specific database collections:
+            <pre>
+                <code>
+                    protected def collection = db.collection[JSONCollection]("posts")
+                </code>
+            </pre>
+        </p>
+
+        <p>
+            To get data from the database use <code>list</code> method. It's use looks like this:
+            <pre>
+                <code>
+                    def list = Action.async {implicit request =>
+                        postRepo.find()
+                        .map(posts => Ok(Json.toJson(posts.reverse)))
+                        .recover {case PrimaryUnavailableException => InternalServerError("Please install MongoDB")}
+                    }
+                </code>
+            </pre>
+            In this case the response is json with all posts from the database collection:
+            <pre>
+                <code>
+                    [
+                        {
+                        "_id": {"$oid":"556848238600001401dfead6"},
+                        "text" : "Have you heard about the Web Components revolution?",
+                        "username" : "Eric",
+                        "avatar" : "../images/avatar-01.svg",
+                        "favorite": false
+                        },
+                        {
+                        "uid": {"$oid":"556848238600001401dfead7"},
+                        "text" : "Loving this Polymer thing.",
+                        "username" : "Rob",
+                        "avatar" : "../images/avatar-02.svg",
+                        "favorite": false
+                        },
+                        ...
+                    ]
+                </code>
+            </pre>
+        </p>
+
+        <p>
+            To <code>like</code> post : In the template it accepts json body with favorite, boolean flag. The method saves this flag in the database collection:
+            <pre>
+                <code>
+                    def like(id: String) = Action.async(BodyParsers.parse.json) { implicit request =>
+                        val value = (request.body \ Favorite).as[Boolean]
+                        postRepo.update(BSONDocument(Id -> BSONObjectID(id)), BSONDocument("$set" -> BSONDocument(Favorite -> value)))
+                        .map(le => Ok(Json.obj("success" -> le.ok)))
+                    }
+                </code>
+            </pre>
+        </p>
+
+        <p>
+            To <code>update</code> post's message : In the template it accepts json body with text, String parameter:
+            <pre>
+                <code>
+                    def update(id: String) = Action.async(BodyParsers.parse.json) { implicit request =>
+                        val value = (request.body \ Text).as[String]
+                        postRepo.update(BSONDocument(Id -> BSONObjectID(id)), BSONDocument("$set" -> BSONDocument(Text -> value)))
+                        .map(le => Ok(Json.obj("success" -> le.ok)))
+                    }
+                </code>
+            </pre>
+        </p>
+
+        <p>
+            To <code>delete</code> post :
+            <pre>
+                <code>
+                    def delete(id: String) = Action.async {
+                        postRepo.remove(BSONDocument(Id -> BSONObjectID(id)))
+                        .map(le => RedirectAfterPost(le, routes.Posts.list()))
+                    }
+                </code>
+            </pre>
+        </p>
+
+        <p>
+            To <code>add</code> post :
+            <pre>
+                <code>
+                    def add = Action.async(BodyParsers.parse.json) { implicit request =>
+                        val username = (request.body \ Username).as[String]
+                        val text = (request.body \ Text).as[String]
+                        val avatar = (request.body \ Avatar).as[String]
+                        postRepo.save(BSONDocument(
+                            Text -> text,
+                            Username -> username,
+                            Avatar -> avatar,
+                            Favorite -> false
+                        )).map(le => Redirect(routes.Posts.list()))
+                    }
+                </code>
+            </pre>
+        </p>
+
+        <p>
+            To expose REST API in Play framework the <a href="#code/conf/routes" class="shortcut">routes</a> file has been configured:
+            <pre>
+                <code>
+                    GET     /api/posts                  controllers.Posts.list
+                    PATCH   /api/post/:id/like          controllers.Posts.like(id: String)
+                    PATCH   /api/post/:id               controllers.Posts.update(id: String)
+                    POST    /api/post                   controllers.Posts.add
+                    DELETE  /api/post/:id               controllers.Posts.delete(id : String)
+                </code>
+            </pre>
+        </p>
+    </div>
+
+    <div>
+        <h2>Frontend</h2>
+        <p>
+            Frontend is based on <a href="https://www.polymer-project.org/"><code>Polymer</code></a> which uses
+            <a href="http://webcomponents.org/"><code>Web Components</code></a>.
+            It's a very prospecting technology, promising true component development of the web.
+        </p>
+        <p>
+            For sake of this template this
+            <a href="https://www.polymer-project.org/docs/start/tutorial/intro.html">sample app</a> available on Polymer
+            website has been used.
+        </p>
+        <p>
+            All resources from the sample app have been copied to <a href="#code/public" class="shortcut">public</a> directory in Play application.
+            (We are looking forward to publishing polymer and web components as webjars in the future to use them as dependencies instead).
+            Application is built from the <a href="#code/public/app/post-list.html" class="shortcut">post-list</a> element which represents a list of posts.
+            A single post is represented by the <a href="#code/public/app/post-card.html" class="shortcut">post-card</a> element.
+        </p>
+        <p>
+            Polymer elements encapsulate template for view and script for behavior:
+            <pre>
+                <code>
+            &lt;dom-module id="unique-id"&gt;
+                &lt;template&gt;
+                    ...
+                &lt;/template&gt;
+            &lt;/dom-module&gt;
+
+            &lt;script&gt;
+                Polymer({
+                    is: 'unique-id',
+                    ...
+                });
+            &lt;/script&gt;
+                </code>
+            </pre>
+        </p>
+        <p>
+            Use data binding in your markup to fill your template with data:
+            <pre>
+                <code>
+    &lt;img src="[[item.avatar]]" width="70" height="70"&gt;
+    &lt;h2>[[item.username]]&lt;h2&gt;
+                </code>
+            </pre>
+        </p>
+    </div>
+
+    <div>
+        <h2>Communication</h2>
+        <p>
+            The <code>core-ajax</code> component in <a href="#code/public/post-service/post-service.html" class="shortcut">post-service</a> element is used to call backend REST services from Polymer:
+            <pre>
+                <code>
+    &lt;iron-ajax id="ajax"
+               url="/api/posts"
+               handle-as="json"
+               last-response="{{posts}}"&gt;
+    &lt;/iron-ajax&gt;
+                </code>
+            </pre>
+        </p>
+
+        <p>
+            The <code>posts</code> element attribute is public and can be used by other elements:
+            <pre>
+                <code>
+    &lt;post-service id="service" posts="{{posts}}" ...&gt;&lt;/post-service&gt;
+                </code>
+            </pre>
+        </p>
+
+        <p>
+            To set favorite flag for a post you have to call the <code>like</code> REST URL.
+            Specify the HTTP method, url, body and contentType:
+            <pre>
+                <code>
+    &lt;iron-ajax id="likeCall"
+               method="PATCH"
+               content-type="application/json"
+               handle-as="json"
+               on-response="refresh"&gt;
+    &lt;/iron-ajax&gt;
+                </code>
+            </pre>
+        </p>
+        <p>
+            To make the call bind your parameters and invoke <code>go</code> method on the <code>like-call</code> <code>iron-ajax</code> component:
+            <pre>
+                <code>
+    setFavorite: function(id, isFavorite) {
+        this.$.likeCall.url = '/api/post/' + id + '/like';
+        this.$.likeCall.body = JSON.stringify({ "favorite": isFavorite });
+        this.$.likeCall.generateRequest();
+    }
+                </code>
+            </pre>
+        </p>
+    </div>
+    <div>
+        <h2>Summary</h2>
+        <p>
+            <code>MongoDB</code> and <code>Play Framework</code> are a great mix to implement backend web services, easy to integrate with contemporary UI frameworks.
+        </p>
+        <p>
+            Thanks to Mongo you can store data without worrying about the schema and Play can expose this data very easily via REST API.
+        </p>
+        <p>
+            It is a very powerful technology stack with the UI in cutting edge <code>Polymer</code> library and <code>Web components</code>.
+        </p>
+    </div>
+</body>
+</html>
